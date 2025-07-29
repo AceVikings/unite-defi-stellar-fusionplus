@@ -1,0 +1,28 @@
+# Rust/Cargo
+target/
+Cargo.lock
+
+# Soroban
+.soroban/
+.stellar/
+.contract_id
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Environment files
+.env
+.env.local
+
+# Build artifacts
+*.wasm
