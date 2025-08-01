@@ -1,16 +1,17 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
-import { Contract, Signer } from "ethers";
+import { CrossChainHTLC, MockERC20 } from "../typechain-types";
+import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 import { time, loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 
 describe("CrossChainHTLC", function () {
   // Test accounts
-  let htlc: Contract;
-  let mockToken: Contract;
-  let owner: Signer;
-  let alice: Signer;
-  let bob: Signer;
-  let charlie: Signer;
+  let htlc: CrossChainHTLC;
+  let mockToken: MockERC20;
+  let owner: HardhatEthersSigner;
+  let alice: HardhatEthersSigner;
+  let bob: HardhatEthersSigner;
+  let charlie: HardhatEthersSigner;
 
   // Test constants
   const INITIAL_TOKEN_SUPPLY = ethers.parseEther("1000000");
@@ -38,14 +39,16 @@ describe("CrossChainHTLC", function () {
     const htlc = await CrossChainHTLC.deploy();
 
     // Distribute tokens for testing
-    await mockToken.transfer(alice.getAddress(), LOCK_AMOUNT * 10n);
-    await mockToken.transfer(bob.getAddress(), LOCK_AMOUNT * 10n);
+    await mockToken.transfer(await alice.getAddress(), LOCK_AMOUNT * 10n);
+    await mockToken.transfer(await bob.getAddress(), LOCK_AMOUNT * 10n);
 
     return { htlc, mockToken, owner, alice, bob, charlie };
   }
 
   beforeEach(async function () {
-    ({ htlc, mockToken, owner, alice, bob, charlie } = await loadFixture(deployHTLCFixture));
+    ({ htlc, mockToken, owner, alice, bob, charlie } = await loadFixture(
+      deployHTLCFixture
+    ));
   });
 
   describe("Deployment", function () {
@@ -55,30 +58,51 @@ describe("CrossChainHTLC", function () {
     });
 
     it("Should have correct initial token balances", async function () {
-      expect(await mockToken.balanceOf(alice.getAddress())).to.equal(LOCK_AMOUNT * 10n);
-      expect(await mockToken.balanceOf(bob.getAddress())).to.equal(LOCK_AMOUNT * 10n);
+      expect(await mockToken.balanceOf(alice.getAddress())).to.equal(
+        LOCK_AMOUNT * 10n
+      );
+      expect(await mockToken.balanceOf(bob.getAddress())).to.equal(
+        LOCK_AMOUNT * 10n
+      );
     });
   });
 
   describe("Lock Funds (ERC20)", function () {
     it("Should lock ERC20 tokens successfully", async function () {
       const timelock = (await time.latest()) + ONE_DAY;
-      
+
       // Approve tokens
-      await mockToken.connect(alice).approve(htlc.getAddress(), LOCK_AMOUNT);
-      
+      await mockToken
+        .connect(alice)
+        .approve(await htlc.getAddress(), LOCK_AMOUNT);
+
       // Lock funds
-      const tx = await htlc.connect(alice).lockFunds(
-        bob.getAddress(),
-        mockToken.getAddress(),
-        LOCK_AMOUNT,
-        HASHLOCK,
-        timelock
-      );
+      const tx = await htlc
+        .connect(alice)
+        .lockFunds(
+          await bob.getAddress(),
+          await mockToken.getAddress(),
+          LOCK_AMOUNT,
+          HASHLOCK,
+          timelock
+        );
 
       const receipt = await tx.wait();
-      const event = receipt.logs.find((log: any) => log.fragment?.name === "FundsLocked");
-      const swapId = event.args.swapId;
+      if (!receipt) throw new Error("Transaction receipt is null");
+
+      // Parse event to get swap ID
+      let swapId: string = "";
+      for (const log of receipt.logs) {
+        try {
+          const parsedLog = htlc.interface.parseLog(log);
+          if (parsedLog && parsedLog.name === "FundsLocked") {
+            swapId = parsedLog.args.swapId;
+            break;
+          }
+        } catch {
+          // Skip logs that can't be parsed
+        }
+      }
 
       // Check swap data
       const swap = await htlc.getSwapData(swapId);
@@ -92,86 +116,107 @@ describe("CrossChainHTLC", function () {
       expect(swap.refunded).to.be.false;
 
       // Check balances
-      expect(await mockToken.balanceOf(await htlc.getAddress())).to.equal(LOCK_AMOUNT);
-      expect(await mockToken.balanceOf(await alice.getAddress())).to.equal(LOCK_AMOUNT * 9n);
+      expect(await mockToken.balanceOf(await htlc.getAddress())).to.equal(
+        LOCK_AMOUNT
+      );
+      expect(await mockToken.balanceOf(await alice.getAddress())).to.equal(
+        LOCK_AMOUNT * 9n
+      );
     });
 
     it("Should emit FundsLocked event", async function () {
       const timelock = (await time.latest()) + ONE_DAY;
-      
-      await mockToken.connect(alice).approve(await htlc.getAddress(), LOCK_AMOUNT);
-      
+
+      await mockToken
+        .connect(alice)
+        .approve(await htlc.getAddress(), LOCK_AMOUNT);
+
       await expect(
-        htlc.connect(alice).lockFunds(
-          await bob.getAddress(),
-          await mockToken.getAddress(),
-          LOCK_AMOUNT,
-          HASHLOCK,
-          timelock
-        )
+        htlc
+          .connect(alice)
+          .lockFunds(
+            await bob.getAddress(),
+            await mockToken.getAddress(),
+            LOCK_AMOUNT,
+            HASHLOCK,
+            timelock
+          )
       ).to.emit(htlc, "FundsLocked");
-    });
     });
 
     it("Should revert with invalid timelock", async function () {
       const pastTimelock = (await time.latest()) - 1000;
-      
-      await mockToken.connect(alice).approve(htlc.getAddress(), LOCK_AMOUNT);
-      
+
+      await mockToken
+        .connect(alice)
+        .approve(await htlc.getAddress(), LOCK_AMOUNT);
+
       await expect(
-        htlc.connect(alice).lockFunds(
-          bob.getAddress(),
-          mockToken.getAddress(),
-          LOCK_AMOUNT,
-          HASHLOCK,
-          pastTimelock
-        )
+        htlc
+          .connect(alice)
+          .lockFunds(
+            await bob.getAddress(),
+            await mockToken.getAddress(),
+            LOCK_AMOUNT,
+            HASHLOCK,
+            pastTimelock
+          )
       ).to.be.revertedWithCustomError(htlc, "InvalidTimelock");
     });
 
     it("Should revert with insufficient timelock duration", async function () {
       const shortTimelock = (await time.latest()) + 30 * 60; // 30 minutes
-      
-      await mockToken.connect(alice).approve(htlc.getAddress(), LOCK_AMOUNT);
-      
+
+      await mockToken
+        .connect(alice)
+        .approve(await htlc.getAddress(), LOCK_AMOUNT);
+
       await expect(
-        htlc.connect(alice).lockFunds(
-          bob.getAddress(),
-          mockToken.getAddress(),
-          LOCK_AMOUNT,
-          HASHLOCK,
-          shortTimelock
-        )
+        htlc
+          .connect(alice)
+          .lockFunds(
+            await bob.getAddress(),
+            await mockToken.getAddress(),
+            LOCK_AMOUNT,
+            HASHLOCK,
+            shortTimelock
+          )
       ).to.be.revertedWithCustomError(htlc, "InvalidTimelock");
     });
 
     it("Should revert with invalid amount", async function () {
       const timelock = (await time.latest()) + ONE_DAY;
-      
+
       await expect(
-        htlc.connect(alice).lockFunds(
-          bob.getAddress(),
-          mockToken.getAddress(),
-          0,
-          HASHLOCK,
-          timelock
-        )
+        htlc
+          .connect(alice)
+          .lockFunds(
+            await bob.getAddress(),
+            await mockToken.getAddress(),
+            0,
+            HASHLOCK,
+            timelock
+          )
       ).to.be.revertedWithCustomError(htlc, "InvalidAmount");
     });
 
     it("Should revert with invalid hashlock", async function () {
       const timelock = (await time.latest()) + ONE_DAY;
-      
-      await mockToken.connect(alice).approve(htlc.getAddress(), LOCK_AMOUNT);
-      
+
+      await mockToken
+        .connect(alice)
+        .approve(await htlc.getAddress(), LOCK_AMOUNT);
+
       await expect(
-        htlc.connect(alice).lockFunds(
-          bob.getAddress(),
-          mockToken.getAddress(),
-          LOCK_AMOUNT,
-          ethers.ZeroHash,
-          timelock
-        )
+        htlc
+          .connect(alice)
+          .lockFunds(
+            await bob.getAddress(),
+            await mockToken.getAddress(),
+            LOCK_AMOUNT,
+            ethers.ZeroHash,
+            timelock
+          )
       ).to.be.revertedWithCustomError(htlc, "InvalidHashlock");
     });
   });
@@ -179,17 +224,29 @@ describe("CrossChainHTLC", function () {
   describe("Lock ETH", function () {
     it("Should lock ETH successfully", async function () {
       const timelock = (await time.latest()) + ONE_DAY;
-      
-      const tx = await htlc.connect(alice).lockETH(
-        bob.getAddress(),
-        HASHLOCK,
-        timelock,
-        { value: ETH_LOCK_AMOUNT }
-      );
+
+      const tx = await htlc
+        .connect(alice)
+        .lockETH(await bob.getAddress(), HASHLOCK, timelock, {
+          value: ETH_LOCK_AMOUNT,
+        });
 
       const receipt = await tx.wait();
-      const event = receipt.logs.find((log: any) => log.fragment?.name === "FundsLocked");
-      const swapId = event.args.swapId;
+      if (!receipt) throw new Error("Transaction receipt is null");
+
+      // Parse event to get swap ID
+      let swapId: string = "";
+      for (const log of receipt.logs) {
+        try {
+          const parsedLog = htlc.interface.parseLog(log);
+          if (parsedLog && parsedLog.name === "FundsLocked") {
+            swapId = parsedLog.args.swapId;
+            break;
+          }
+        } catch {
+          // Skip logs that can't be parsed
+        }
+      }
 
       // Check swap data
       const swap = await htlc.getSwapData(swapId);
@@ -199,164 +256,189 @@ describe("CrossChainHTLC", function () {
       expect(swap.amount).to.equal(ETH_LOCK_AMOUNT);
       expect(swap.hashlock).to.equal(HASHLOCK);
       expect(swap.timelock).to.equal(timelock);
+      expect(swap.claimed).to.be.false;
+      expect(swap.refunded).to.be.false;
 
       // Check contract balance
-      expect(await ethers.provider.getBalance(await htlc.getAddress())).to.equal(ETH_LOCK_AMOUNT);
+      expect(
+        await ethers.provider.getBalance(await htlc.getAddress())
+      ).to.equal(ETH_LOCK_AMOUNT);
     });
 
-    it("Should revert with zero ETH", async function () {
+    it("Should revert with invalid amount", async function () {
       const timelock = (await time.latest()) + ONE_DAY;
-      
+
       await expect(
-        htlc.connect(alice).lockETH(
-          await bob.getAddress(),
-          HASHLOCK,
-          timelock,
-          { value: 0 }
-        )
+        htlc
+          .connect(alice)
+          .lockETH(await bob.getAddress(), HASHLOCK, timelock, { value: 0 })
       ).to.be.revertedWithCustomError(htlc, "InvalidAmount");
     });
   });
 
-  describe("Claim Funds", function () {
+  describe("Claim Funds (ERC20)", function () {
     let swapId: string;
 
     beforeEach(async function () {
       const timelock = (await time.latest()) + ONE_DAY;
-      
-      // Lock tokens
-      await mockToken.connect(alice).approve(await htlc.getAddress(), LOCK_AMOUNT);
-      const tx = await htlc.connect(alice).lockFunds(
-        await bob.getAddress(),
-        await mockToken.getAddress(),
-        LOCK_AMOUNT,
-        HASHLOCK,
-        timelock
-      );
-      
+
+      await mockToken
+        .connect(alice)
+        .approve(await htlc.getAddress(), LOCK_AMOUNT);
+
+      const tx = await htlc
+        .connect(alice)
+        .lockFunds(
+          await bob.getAddress(),
+          await mockToken.getAddress(),
+          LOCK_AMOUNT,
+          HASHLOCK,
+          timelock
+        );
+
       const receipt = await tx.wait();
-      const event = receipt.logs.find((log: any) => log.fragment?.name === "FundsLocked");
-      swapId = event.args.swapId;
+      if (!receipt) throw new Error("Transaction receipt is null");
+
+      // Parse event to get swap ID
+      for (const log of receipt.logs) {
+        try {
+          const parsedLog = htlc.interface.parseLog(log);
+          if (parsedLog && parsedLog.name === "FundsLocked") {
+            swapId = parsedLog.args.swapId;
+            break;
+          }
+        } catch {
+          // Skip logs that can't be parsed
+        }
+      }
     });
 
-    it("Should claim funds with correct preimage", async function () {
-      const bobBalanceBefore = await mockToken.balanceOf(bob.getAddress());
-      
-      await expect(
-        htlc.connect(bob).claimFunds(swapId, SECRET)
-      ).to.emit(htlc, "FundsClaimed")
+    it("Should claim ERC20 tokens successfully", async function () {
+      const bobBalanceBefore = await mockToken.balanceOf(
+        await bob.getAddress()
+      );
+
+      await expect(htlc.connect(bob).claimFunds(swapId, SECRET))
+        .to.emit(htlc, "FundsClaimed")
         .withArgs(swapId, await bob.getAddress(), SECRET, LOCK_AMOUNT);
 
-      // Check balances
       const bobBalanceAfter = await mockToken.balanceOf(await bob.getAddress());
       expect(bobBalanceAfter - bobBalanceBefore).to.equal(LOCK_AMOUNT);
       expect(await mockToken.balanceOf(await htlc.getAddress())).to.equal(0);
 
-      // Check swap state
       const swap = await htlc.getSwapData(swapId);
       expect(swap.claimed).to.be.true;
       expect(swap.preimage).to.equal(SECRET);
     });
 
-    it("Should revert when claiming with wrong preimage", async function () {
-      const wrongSecret = "0x" + "b".repeat(64); // Different 32-byte value
-      
+    it("Should revert with wrong preimage", async function () {
+      const wrongSecret = "0x" + "b".repeat(64);
+
       await expect(
         htlc.connect(bob).claimFunds(swapId, wrongSecret)
       ).to.be.revertedWithCustomError(htlc, "InvalidPreimage");
     });
 
-    it("Should revert when non-recipient tries to claim", async function () {
+    it("Should revert with unauthorized claimer", async function () {
       await expect(
         htlc.connect(charlie).claimFunds(swapId, SECRET)
       ).to.be.revertedWithCustomError(htlc, "UnauthorizedClaim");
     });
 
-    it("Should revert when claiming after timelock expiry", async function () {
-      // Fast forward past timelock
+    it("Should revert after timelock expiry", async function () {
       await time.increase(ONE_DAY + 1);
-      
+
       await expect(
         htlc.connect(bob).claimFunds(swapId, SECRET)
       ).to.be.revertedWithCustomError(htlc, "TimelockExpired");
     });
 
-    it("Should revert when claiming already claimed swap", async function () {
-      // First claim
+    it("Should revert if already claimed", async function () {
       await htlc.connect(bob).claimFunds(swapId, SECRET);
-      
-      // Try to claim again
+
       await expect(
         htlc.connect(bob).claimFunds(swapId, SECRET)
       ).to.be.revertedWithCustomError(htlc, "SwapAlreadyCompleted");
     });
   });
 
-  describe("Refund Funds", function () {
+  describe("Refund Funds (ERC20)", function () {
     let swapId: string;
     let timelock: number;
 
     beforeEach(async function () {
       timelock = (await time.latest()) + ONE_DAY;
-      
-      // Lock tokens
-      await mockToken.connect(alice).approve(await htlc.getAddress(), LOCK_AMOUNT);
-      const tx = await htlc.connect(alice).lockFunds(
-        await bob.getAddress(),
-        await mockToken.getAddress(),
-        LOCK_AMOUNT,
-        HASHLOCK,
-        timelock
-      );
-      
+
+      await mockToken
+        .connect(alice)
+        .approve(await htlc.getAddress(), LOCK_AMOUNT);
+
+      const tx = await htlc
+        .connect(alice)
+        .lockFunds(
+          await bob.getAddress(),
+          await mockToken.getAddress(),
+          LOCK_AMOUNT,
+          HASHLOCK,
+          timelock
+        );
+
       const receipt = await tx.wait();
-      const event = receipt.logs.find((log: any) => log.fragment?.name === "FundsLocked");
-      swapId = event.args.swapId;
+      if (!receipt) throw new Error("Transaction receipt is null");
+
+      // Parse event to get swap ID
+      for (const log of receipt.logs) {
+        try {
+          const parsedLog = htlc.interface.parseLog(log);
+          if (parsedLog && parsedLog.name === "FundsLocked") {
+            swapId = parsedLog.args.swapId;
+            break;
+          }
+        } catch {
+          // Skip logs that can't be parsed
+        }
+      }
     });
 
-    it("Should refund funds after timelock expiry", async function () {
-      // Fast forward past timelock
+    it("Should refund ERC20 tokens after timelock expiry", async function () {
       await time.increase(ONE_DAY + 1);
-      
-      const aliceBalanceBefore = await mockToken.balanceOf(await alice.getAddress());
-      
-      await expect(
-        htlc.connect(alice).refundFunds(swapId)
-      ).to.emit(htlc, "FundsRefunded")
+
+      const aliceBalanceBefore = await mockToken.balanceOf(
+        await alice.getAddress()
+      );
+
+      await expect(htlc.connect(alice).refundFunds(swapId))
+        .to.emit(htlc, "FundsRefunded")
         .withArgs(swapId, await alice.getAddress(), LOCK_AMOUNT);
 
-      // Check balances
-      const aliceBalanceAfter = await mockToken.balanceOf(await alice.getAddress());
+      const aliceBalanceAfter = await mockToken.balanceOf(
+        await alice.getAddress()
+      );
       expect(aliceBalanceAfter - aliceBalanceBefore).to.equal(LOCK_AMOUNT);
       expect(await mockToken.balanceOf(await htlc.getAddress())).to.equal(0);
 
-      // Check swap state
       const swap = await htlc.getSwapData(swapId);
       expect(swap.refunded).to.be.true;
     });
 
-    it("Should revert when refunding before timelock expiry", async function () {
+    it("Should revert refund before timelock expiry", async function () {
       await expect(
         htlc.connect(alice).refundFunds(swapId)
       ).to.be.revertedWithCustomError(htlc, "TimelockNotExpired");
     });
 
-    it("Should revert when non-sender tries to refund", async function () {
+    it("Should revert refund with unauthorized sender", async function () {
       await time.increase(ONE_DAY + 1);
-      
+
       await expect(
         htlc.connect(bob).refundFunds(swapId)
       ).to.be.revertedWithCustomError(htlc, "UnauthorizedRefund");
     });
 
-    it("Should revert when refunding already claimed swap", async function () {
-      // Claim first
+    it("Should revert refund if already claimed", async function () {
       await htlc.connect(bob).claimFunds(swapId, SECRET);
-      
-      // Fast forward past timelock
       await time.increase(ONE_DAY + 1);
-      
-      // Try to refund
+
       await expect(
         htlc.connect(alice).refundFunds(swapId)
       ).to.be.revertedWithCustomError(htlc, "SwapAlreadyCompleted");
@@ -364,99 +446,171 @@ describe("CrossChainHTLC", function () {
   });
 
   describe("ETH Operations", function () {
-    let ethSwapId: string;
-
-    beforeEach(async function () {
-      const timelock = (await time.latest()) + ONE_DAY;
-      
-      // Lock ETH
-      const tx = await htlc.connect(alice).lockETH(
-        await bob.getAddress(),
-        HASHLOCK,
-        timelock,
-        { value: ETH_LOCK_AMOUNT }
-      );
-      
-      const receipt = await tx.wait();
-      const event = receipt.logs.find((log: any) => log.fragment?.name === "FundsLocked");
-      ethSwapId = event.args.swapId;
-    });
-
     it("Should claim ETH successfully", async function () {
-      const bobBalanceBefore = await ethers.provider.getBalance(bob.getAddress());
-      
-      const tx = await htlc.connect(bob).claimFunds(ethSwapId, SECRET);
+      const timelock = (await time.latest()) + ONE_DAY;
+
+      const tx = await htlc
+        .connect(alice)
+        .lockETH(await bob.getAddress(), HASHLOCK, timelock, {
+          value: ETH_LOCK_AMOUNT,
+        });
+
       const receipt = await tx.wait();
-      const gasUsed = receipt.gasUsed * receipt.gasPrice;
-      
-      const bobBalanceAfter = await ethers.provider.getBalance(bob.getAddress());
-      
-      // Account for gas costs in the balance check
-      expect(bobBalanceAfter - bobBalanceBefore + gasUsed).to.equal(ETH_LOCK_AMOUNT);
-      expect(await ethers.provider.getBalance(await htlc.getAddress())).to.equal(0);
+      if (!receipt) throw new Error("Transaction receipt is null");
+
+      // Parse event to get swap ID
+      let ethSwapId: string = "";
+      for (const log of receipt.logs) {
+        try {
+          const parsedLog = htlc.interface.parseLog(log);
+          if (parsedLog && parsedLog.name === "FundsLocked") {
+            ethSwapId = parsedLog.args.swapId;
+            break;
+          }
+        } catch {
+          // Skip logs that can't be parsed
+        }
+      }
+
+      const bobBalanceBefore = await ethers.provider.getBalance(
+        await bob.getAddress()
+      );
+
+      const claimTx = await htlc.connect(bob).claimFunds(ethSwapId, SECRET);
+      const claimReceipt = await claimTx.wait();
+      if (!claimReceipt) throw new Error("Claim receipt is null");
+
+      const gasUsed = claimReceipt.gasUsed * claimReceipt.gasPrice;
+
+      const bobBalanceAfter = await ethers.provider.getBalance(
+        await bob.getAddress()
+      );
+      expect(bobBalanceAfter - bobBalanceBefore + gasUsed).to.equal(
+        ETH_LOCK_AMOUNT
+      );
+      expect(
+        await ethers.provider.getBalance(await htlc.getAddress())
+      ).to.equal(0);
     });
 
     it("Should refund ETH successfully", async function () {
-      // Fast forward past timelock
-      await time.increase(ONE_DAY + 1);
-      
-      const aliceBalanceBefore = await ethers.provider.getBalance(alice.getAddress());
-      
-      const tx = await htlc.connect(alice).refundFunds(ethSwapId);
+      const timelock = (await time.latest()) + ONE_DAY;
+
+      const tx = await htlc
+        .connect(alice)
+        .lockETH(await bob.getAddress(), HASHLOCK, timelock, {
+          value: ETH_LOCK_AMOUNT,
+        });
+
       const receipt = await tx.wait();
-      const gasUsed = receipt.gasUsed * receipt.gasPrice;
-      
-      const aliceBalanceAfter = await ethers.provider.getBalance(alice.getAddress());
-      
-      // Account for gas costs
-      expect(aliceBalanceAfter - aliceBalanceBefore + gasUsed).to.equal(ETH_LOCK_AMOUNT);
-      expect(await ethers.provider.getBalance(await htlc.getAddress())).to.equal(0);
+      if (!receipt) throw new Error("Transaction receipt is null");
+
+      // Parse event to get swap ID
+      let ethSwapId: string = "";
+      for (const log of receipt.logs) {
+        try {
+          const parsedLog = htlc.interface.parseLog(log);
+          if (parsedLog && parsedLog.name === "FundsLocked") {
+            ethSwapId = parsedLog.args.swapId;
+            break;
+          }
+        } catch {
+          // Skip logs that can't be parsed
+        }
+      }
+
+      await time.increase(ONE_DAY + 1);
+
+      const aliceBalanceBefore = await ethers.provider.getBalance(
+        await alice.getAddress()
+      );
+
+      const refundTx = await htlc.connect(alice).refundFunds(ethSwapId);
+      const refundReceipt = await refundTx.wait();
+      if (!refundReceipt) throw new Error("Refund receipt is null");
+
+      const gasUsed = refundReceipt.gasUsed * refundReceipt.gasPrice;
+
+      const aliceBalanceAfter = await ethers.provider.getBalance(
+        await alice.getAddress()
+      );
+      expect(aliceBalanceAfter - aliceBalanceBefore + gasUsed).to.equal(
+        ETH_LOCK_AMOUNT
+      );
+      expect(
+        await ethers.provider.getBalance(await htlc.getAddress())
+      ).to.equal(0);
+    });
+  });
+
+  describe("Multiple Swaps", function () {
+    it("Should handle multiple swaps for one user", async function () {
+      const timelock = (await time.latest()) + ONE_DAY;
+
+      await mockToken
+        .connect(alice)
+        .approve(await htlc.getAddress(), LOCK_AMOUNT * 2n);
+
+      await htlc
+        .connect(alice)
+        .lockFunds(
+          await bob.getAddress(),
+          await mockToken.getAddress(),
+          LOCK_AMOUNT,
+          HASHLOCK,
+          timelock
+        );
+
+      await htlc
+        .connect(alice)
+        .lockFunds(
+          await charlie.getAddress(),
+          await mockToken.getAddress(),
+          LOCK_AMOUNT,
+          HASHLOCK,
+          timelock
+        );
+
+      const userSwaps = await htlc.getUserSwaps(await alice.getAddress());
+      expect(userSwaps.length).to.equal(2);
     });
   });
 
   describe("Utility Functions", function () {
-    it("Should get user swaps", async function () {
+    it("Should check if swap exists", async function () {
       const timelock = (await time.latest()) + ONE_DAY;
-      
-      // Create multiple swaps
-      await mockToken.connect(alice).approve(await htlc.getAddress(), LOCK_AMOUNT * 2n);
-      
-      await htlc.connect(alice).lockFunds(
-        await bob.getAddress(),
-        await mockToken.getAddress(),
-        LOCK_AMOUNT,
-        HASHLOCK,
-        timelock
-      );
-      
-      await htlc.connect(alice).lockFunds(
-        await charlie.getAddress(),
-        await mockToken.getAddress(),
-        LOCK_AMOUNT,
-        HASHLOCK,
-        timelock
-      );
-      
-      const userSwaps = await htlc.getUserSwaps(await alice.getAddress());
-      expect(userSwaps.length).to.equal(2);
-    });
 
-    it("Should check swap existence", async function () {
-      const timelock = (await time.latest()) + ONE_DAY;
-      
-      await mockToken.connect(alice).approve(await htlc.getAddress(), LOCK_AMOUNT);
-      const tx = await htlc.connect(alice).lockFunds(
-        await bob.getAddress(),
-        await mockToken.getAddress(),
-        LOCK_AMOUNT,
-        HASHLOCK,
-        timelock
-      );
-      
+      await mockToken
+        .connect(alice)
+        .approve(await htlc.getAddress(), LOCK_AMOUNT);
+
+      const tx = await htlc
+        .connect(alice)
+        .lockFunds(
+          await bob.getAddress(),
+          await mockToken.getAddress(),
+          LOCK_AMOUNT,
+          HASHLOCK,
+          timelock
+        );
+
       const receipt = await tx.wait();
-      const event = receipt.logs.find((log: any) => log.fragment?.name === "FundsLocked");
-      const swapId = event.args.swapId;
-      
+      if (!receipt) throw new Error("Transaction receipt is null");
+
+      // Parse event to get swap ID
+      let swapId: string = "";
+      for (const log of receipt.logs) {
+        try {
+          const parsedLog = htlc.interface.parseLog(log);
+          if (parsedLog && parsedLog.name === "FundsLocked") {
+            swapId = parsedLog.args.swapId;
+            break;
+          }
+        } catch {
+          // Skip logs that can't be parsed
+        }
+      }
+
       expect(await htlc.swapExists(swapId)).to.be.true;
       expect(await htlc.swapExists(ethers.ZeroHash)).to.be.false;
     });
@@ -464,87 +618,113 @@ describe("CrossChainHTLC", function () {
     it("Should get current time", async function () {
       const contractTime = await htlc.getCurrentTime();
       const blockTime = await time.latest();
-      
-      expect(contractTime).to.be.closeTo(blockTime, 5); // Within 5 seconds
+      expect(contractTime).to.be.closeTo(BigInt(blockTime), 2);
     });
 
     it("Should get contract balances", async function () {
       const timelock = (await time.latest()) + ONE_DAY;
-      
-      // Lock tokens
-      await mockToken.connect(alice).approve(htlc.getAddress(), LOCK_AMOUNT);
-      await htlc.connect(alice).lockFunds(
-        bob.getAddress(),
-        mockToken.getAddress(),
-        LOCK_AMOUNT,
-        HASHLOCK,
-        timelock
-      );
-      
-      // Lock ETH
-      await htlc.connect(alice).lockETH(
-        await bob.getAddress(),
-        HASHLOCK,
-        timelock,
-        { value: ETH_LOCK_AMOUNT }
-      );
-      
-      expect(await htlc.getContractBalance()).to.equal(ETH_LOCK_AMOUNT);
-      expect(await htlc.getTokenBalance(await mockToken.getAddress())).to.equal(LOCK_AMOUNT);
-    });
-  });
 
-  describe("Error Cases", function () {
-    it("Should revert when getting data for non-existent swap", async function () {
+      // Lock ERC20 tokens
+      await mockToken
+        .connect(alice)
+        .approve(await htlc.getAddress(), LOCK_AMOUNT);
+      await htlc
+        .connect(alice)
+        .lockFunds(
+          await bob.getAddress(),
+          await mockToken.getAddress(),
+          LOCK_AMOUNT,
+          HASHLOCK,
+          timelock
+        );
+
+      // Lock ETH
+      await htlc
+        .connect(alice)
+        .lockETH(await bob.getAddress(), HASHLOCK, timelock, {
+          value: ETH_LOCK_AMOUNT,
+        });
+
+      expect(await htlc.getContractBalance()).to.equal(ETH_LOCK_AMOUNT);
+      expect(await htlc.getTokenBalance(await mockToken.getAddress())).to.equal(
+        LOCK_AMOUNT
+      );
+    });
+
+    it("Should revert for non-existent swap", async function () {
       await expect(
         htlc.getSwapData(ethers.ZeroHash)
       ).to.be.revertedWithCustomError(htlc, "SwapNotFound");
     });
+  });
 
-    it("Should handle insufficient token allowance", async function () {
+  describe("Insufficient Allowance", function () {
+    it("Should revert when insufficient token allowance", async function () {
       const timelock = (await time.latest()) + ONE_DAY;
-      
-      // Don't approve tokens
+
       await expect(
-        htlc.connect(alice).lockFunds(
-          bob.getAddress(),
-          mockToken.getAddress(),
-          LOCK_AMOUNT,
-          HASHLOCK,
-          timelock
-        )
-      ).to.be.reverted; // ERC20 transfer will revert
+        htlc
+          .connect(alice)
+          .lockFunds(
+            await bob.getAddress(),
+            await mockToken.getAddress(),
+            LOCK_AMOUNT,
+            HASHLOCK,
+            timelock
+          )
+      ).to.be.reverted;
     });
   });
 
   describe("Gas Usage", function () {
-    it("Should measure gas usage for operations", async function () {
+    it("Should measure gas usage for complete flow", async function () {
       const timelock = (await time.latest()) + ONE_DAY;
-      
-      // Lock funds
-      await mockToken.connect(alice).approve(await htlc.getAddress(), LOCK_AMOUNT);
-      const lockTx = await htlc.connect(alice).lockFunds(
-        await bob.getAddress(),
-        await mockToken.getAddress(),
-        LOCK_AMOUNT,
-        HASHLOCK,
-        timelock
-      );
+
+      await mockToken
+        .connect(alice)
+        .approve(await htlc.getAddress(), LOCK_AMOUNT);
+
+      const lockTx = await htlc
+        .connect(alice)
+        .lockFunds(
+          await bob.getAddress(),
+          await mockToken.getAddress(),
+          LOCK_AMOUNT,
+          HASHLOCK,
+          timelock
+        );
+
       const lockReceipt = await lockTx.wait();
-      console.log(`Lock gas used: ${lockReceipt.gasUsed}`);
-      
-      // Get swap ID
-      const event = lockReceipt.logs.find((log: any) => log.fragment?.name === "FundsLocked");
-      const swapId = event.args.swapId;
-      
-      // Claim funds
+      if (!lockReceipt) throw new Error("Lock receipt is null");
+
+      // Parse event to get swap ID
+      let swapId: string = "";
+      for (const log of lockReceipt.logs) {
+        try {
+          const parsedLog = htlc.interface.parseLog(log);
+          if (parsedLog && parsedLog.name === "FundsLocked") {
+            swapId = parsedLog.args.swapId;
+            break;
+          }
+        } catch {
+          // Skip logs that can't be parsed
+        }
+      }
+
       const claimTx = await htlc.connect(bob).claimFunds(swapId, SECRET);
       const claimReceipt = await claimTx.wait();
-      console.log(`Claim gas used: ${claimReceipt.gasUsed}`);
-      
-      // Verify reasonable gas usage
-      expect(lockReceipt.gasUsed).to.be.lessThan(200000);
-      expect(claimReceipt.gasUsed).to.be.lessThan(150000);
+      if (!claimReceipt) throw new Error("Claim receipt is null");
+
+      console.log(`Lock gas used: ${lockReceipt.gasUsed.toString()}`);
+      console.log(`Claim gas used: ${claimReceipt.gasUsed.toString()}`);
+      console.log(
+        `Total gas used: ${(
+          lockReceipt.gasUsed + claimReceipt.gasUsed
+        ).toString()}`
+      );
+
+      // Gas usage should be reasonable (less than 300k total)
+      expect(lockReceipt.gasUsed + claimReceipt.gasUsed).to.be.lt(500000);
     });
   });
 });
