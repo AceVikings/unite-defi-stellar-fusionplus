@@ -1,0 +1,110 @@
+{
+  "name": "fusionplus-resolver-backend",
+  "version": "1.0.0",
+  "description": "Cross-chain resolver backend for Fusion+ Dutch auction swaps between Ethereum and Stellar",
+  "main": "src/app.js",
+  "scripts": {
+    "start": "node src/app.js",
+    "dev": "nodemon src/app.js",
+    "test": "jest --testMatch='**/tests/unit/**/*.test.js'",
+    "test:integration": "jest --testMatch='**/tests/integration/**/*.test.js'",
+    "test:e2e": "jest --testMatch='**/tests/e2e/**/*.test.js'",
+    "test:all": "jest",
+    "lint": "eslint src/ tests/",
+    "lint:fix": "eslint src/ tests/ --fix",
+    "db:migrate": "node scripts/migrate.js",
+    "db:seed": "node scripts/seed.js",
+    "docker:build": "docker build -t fusionplus-backend .",
+    "docker:run": "docker-compose up -d"
+  },
+  "keywords": [
+    "defi",
+    "cross-chain",
+    "fusion",
+    "ethereum",
+    "stellar",
+    "htlc",
+    "dutch-auction",
+    "resolver",
+    "atomic-swap"
+  ],
+  "author": "FusionPlus Team",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "helmet": "^7.0.0",
+    "compression": "^1.7.4",
+    "express-rate-limit": "^6.7.1",
+    "express-validator": "^7.0.1",
+    "jsonwebtoken": "^9.0.1",
+    "bcryptjs": "^2.4.3",
+    "dotenv": "^16.3.1",
+    "winston": "^3.10.0",
+    "winston-daily-rotate-file": "^4.7.1",
+    "pg": "^8.11.2",
+    "redis": "^4.6.7",
+    "ws": "^8.13.0",
+    "web3": "^4.0.3",
+    "ethers": "^6.6.7",
+    "stellar-sdk": "^11.0.1",
+    "axios": "^1.4.0",
+    "node-cron": "^3.0.2",
+    "uuid": "^9.0.0",
+    "crypto": "^1.0.1",
+    "joi": "^17.9.2",
+    "prometheus-api-metrics": "^3.2.2",
+    "prom-client": "^14.2.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1",
+    "jest": "^29.6.1",
+    "supertest": "^6.3.3",
+    "eslint": "^8.45.0",
+    "eslint-config-prettier": "^8.8.0",
+    "eslint-plugin-prettier": "^5.0.0",
+    "prettier": "^3.0.0",
+    "@types/jest": "^29.5.3"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "coverageDirectory": "coverage",
+    "collectCoverageFrom": [
+      "src/**/*.js",
+      "!src/app.js"
+    ],
+    "setupFilesAfterEnv": [
+      "<rootDir>/tests/setup.js"
+    ]
+  },
+  "eslintConfig": {
+    "env": {
+      "node": true,
+      "es2021": true,
+      "jest": true
+    },
+    "extends": [
+      "eslint:recommended",
+      "prettier"
+    ],
+    "plugins": [
+      "prettier"
+    ],
+    "rules": {
+      "prettier/prettier": "error",
+      "no-unused-vars": ["error", { "argsIgnorePattern": "^_" }],
+      "no-console": "warn"
+    }
+  },
+  "prettier": {
+    "semi": true,
+    "trailingComma": "es5",
+    "singleQuote": true,
+    "printWidth": 80,
+    "tabWidth": 2
+  }
+}
