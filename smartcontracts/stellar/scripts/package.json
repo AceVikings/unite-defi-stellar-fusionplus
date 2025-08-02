@@ -1,0 +1,21 @@
+{
+  "name": "stellar-htlc-deployment",
+  "version": "1.0.0",
+  "description": "Deployment and integration scripts for Stellar HTLC contract",
+  "main": "deploy.js",
+  "scripts": {
+    "deploy:testnet": "node deploy.js --network=testnet",
+    "deploy:mainnet": "node deploy.js --network=mainnet",
+    "verify": "node verify.js",
+    "example": "node examples/cross-chain-swap.js"
+  },
+  "dependencies": {
+    "@stellar/stellar-sdk": "^12.0.0",
+    "dotenv": "^16.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0"
+  },
+  "author": "Unite DeFi Team",
+  "license": "MIT"
+}

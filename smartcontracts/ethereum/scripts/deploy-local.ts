@@ -6,7 +6,10 @@ async function main() {
 
   const [deployer] = await ethers.getSigners();
   console.log("Deploying contracts with account:", await deployer.getAddress());
-  console.log("Account balance:", ethers.formatEther(await ethers.provider.getBalance(deployer.getAddress())));
+  console.log(
+    "Account balance:",
+    ethers.formatEther(await ethers.provider.getBalance(deployer.getAddress()))
+  );
 
   // Deploy MockERC20 for testing
   console.log("\n1. Deploying MockERC20 test token...");
@@ -23,28 +26,39 @@ async function main() {
   // Deploy CrossChainHTLC
   console.log("\n2. Deploying CrossChainHTLC...");
   const CrossChainHTLC = await ethers.getContractFactory("CrossChainHTLC");
-  const htlc = await CrossChainHTLC.deploy();
+  const htlc = await CrossChainHTLC.deploy(await deployer.getAddress()); // Use deployer as initial fee recipient
   await htlc.waitForDeployment();
   console.log("CrossChainHTLC deployed to:", await htlc.getAddress());
 
   // Setup test accounts with tokens
   console.log("\n3. Setting up test accounts...");
   const [, alice, bob] = await ethers.getSigners();
-  
+
   if (alice && bob) {
     const testAmount = ethers.parseEther("1000");
     await mockToken.transfer(await alice.getAddress(), testAmount);
     await mockToken.transfer(await bob.getAddress(), testAmount);
-    
+
     console.log("Distributed test tokens:");
-    console.log("- Alice:", await alice.getAddress(), "- Balance:", ethers.formatEther(await mockToken.balanceOf(alice.getAddress())));
-    console.log("- Bob:", await bob.getAddress(), "- Balance:", ethers.formatEther(await mockToken.balanceOf(bob.getAddress())));
+    console.log(
+      "- Alice:",
+      await alice.getAddress(),
+      "- Balance:",
+      ethers.formatEther(await mockToken.balanceOf(alice.getAddress()))
+    );
+    console.log(
+      "- Bob:",
+      await bob.getAddress(),
+      "- Balance:",
+      ethers.formatEther(await mockToken.balanceOf(bob.getAddress()))
+    );
   }
 
   // Save deployment info
+  const network = await ethers.provider.getNetwork();
   const deploymentInfo = {
     network: "localhost",
-    chainId: (await ethers.provider.getNetwork()).chainId,
+    chainId: network.chainId.toString(), // Convert BigInt to string
     contracts: {
       CrossChainHTLC: {
         address: await htlc.getAddress(),
@@ -53,7 +67,7 @@ async function main() {
       MockERC20: {
         address: await mockToken.getAddress(),
         deployer: await deployer.getAddress(),
-      }
+      },
     },
     accounts: {
       deployer: await deployer.getAddress(),
@@ -72,11 +86,18 @@ async function main() {
   console.log("\n5. Running basic functionality test...");
   try {
     const currentTime = await htlc.getCurrentTime();
-    console.log("✅ Contract is responsive. Current time:", currentTime.toString());
-    
+    console.log(
+      "✅ Contract is responsive. Current time:",
+      currentTime.toString()
+    );
+
     const contractBalance = await htlc.getContractBalance();
-    console.log("✅ Contract balance:", ethers.formatEther(contractBalance), "ETH");
-    
+    console.log(
+      "✅ Contract balance:",
+      ethers.formatEther(contractBalance),
+      "ETH"
+    );
+
     console.log("✅ Deployment completed successfully!");
   } catch (error) {
     console.error("❌ Post-deployment test failed:", error);
