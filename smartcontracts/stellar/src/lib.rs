@@ -322,6 +322,43 @@ impl StellarHTLC {
         );
     }
 
+    /// Mark a swap as failed (admin only)
+    /// 
+    /// # Arguments
+    /// * `swap_id` - Unique identifier of the swap to mark as failed
+    /// * `reason` - Reason for failure
+    pub fn mark_swap_failed(env: Env, swap_id: String, reason: String) {
+        let admin = get_admin(&env);
+        admin.require_auth();
+
+        let mut swap = get_swap(&env, &swap_id)
+            .unwrap_or_else(|| panic_with_error!(&env, HTLCError::SwapNotFound));
+
+        // Only allow marking as failed if not already claimed or refunded
+        if swap.status == SwapStatus::Claimed {
+            panic_with_error!(&env, HTLCError::AlreadyClaimed);
+        }
+        
+        if swap.status == SwapStatus::Refunded {
+            panic_with_error!(&env, HTLCError::AlreadyRefunded);
+        }
+
+        // Update swap status
+        swap.status = SwapStatus::Failed;
+        set_swap(&env, &swap_id, &swap);
+
+        // Emit event
+        emit_swap_failed(&env, swap_id, swap.sender.clone(), reason);
+    }
+
+    /// Check if a swap exists
+    /// 
+    /// # Arguments
+    /// * `swap_id` - Unique identifier of the swap to check
+    pub fn swap_exists(env: Env, swap_id: String) -> bool {
+        get_swap(&env, &swap_id).is_some()
+    }
+
     // View functions
 
     /// Get swap details by ID

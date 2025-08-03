@@ -13,10 +13,11 @@ pub const MAX_PROTOCOL_FEE_BPS: u32 = 500;
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SwapStatus {
-    Pending,
-    Active, 
-    Claimed,
-    Refunded,
+    Pending,    // Swap created, waiting for funding
+    Active,     // Swap funded and active
+    Claimed,    // Swap successfully claimed
+    Refunded,   // Swap refunded after timeout
+    Failed,     // Swap failed for other reasons
 }
 
 /// HTLC Swap structure

@@ -44,6 +44,14 @@ pub struct FundsRefundedEvent {
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SwapFailedEvent {
+    pub swap_id: String,
+    pub sender: Address,
+    pub reason: String,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SwapStatusUpdatedEvent {
     pub swap_id: BytesN<32>,
     pub old_status: SwapStatus,
@@ -161,6 +169,24 @@ pub fn emit_funds_refunded(
     
     env.events().publish(
         (symbol_short!("refunded"), swap_id),
+        event
+    );
+}
+
+pub fn emit_swap_failed(
+    env: &Env,
+    swap_id: String,
+    sender: Address,
+    reason: String,
+) {
+    let event = SwapFailedEvent {
+        swap_id: swap_id.clone(),
+        sender,
+        reason,
+    };
+    
+    env.events().publish(
+        (symbol_short!("failed"), swap_id.clone()),
         event
     );
 }
